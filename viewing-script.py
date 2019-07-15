@@ -25,5 +25,6 @@ for j in [1.0, 2.0, 3.0, 4.0, 5.0, 1100.0, 1101.0, 1102.0, 1103.0, 1104.0, 1536.
 	plt.gca().invert_yaxis()
 	plt.show()
 	print(len(times))
+	print(len(set(times)))
 import pdb; pdb.set_trace()
 

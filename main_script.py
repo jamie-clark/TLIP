@@ -218,7 +218,7 @@ def extract_ra_dec(star_id, db_file):
 
 
 def plot_all_lightcurves(star_id, db_file, mag_err_cutoff):
-	color_list = ['r', 'g', 'k']
+	color_list = ['g', 'r', 'k']
 	marker_list = ['.', 'o', '^', 's', 'x', '+', 'D']
 	filter_list = [1,2,3]
 	site_list = [[[1,2], "LSC-DOMA"], [[8, 12], "CPT-DOMA"], [[3], "LSC-DOMB"], [[4, 5], "LSC-DOMC"], [[6, 10], "COJ-DOMA"], [[7, 11], "COJ-DOMB"], [[9], "CPT-DOMC"]]
@@ -235,7 +235,7 @@ def plot_all_lightcurves(star_id, db_file, mag_err_cutoff):
 			#print(hjd,mag,magerr)
 			plt.scatter(np.asarray(hjd-2450000), mag, c=color, marker=marker, label=site_name)
 			plt.errorbar(np.asarray(hjd)-2450000, mag, c=color, marker=marker, yerr=magerr, linestyle="None")	
-#	plt.legend()
+	plt.legend(loc='best')
 	plt.show()
 
 
@@ -345,3 +345,75 @@ def drip_feed(star_id, db_file, LIA_directory, filt_choice, tel_choices, mag_cut
 	ax1.get_shared_x_axes().join(ax1, ax2)
 	plt.show()
 
+def extract_lightcurves_on_position(ra, dec, radius, db_file, filt_choice='3', tel_choices=[1, 2], mag_cutoff=[14,17], mag_err_cutoff=0.1):
+	"""Creates...
+
+	Parameters
+	__________
+	ra : string
+		Central RA(J2000) in 'hh:mm:ss' string format.
+	dec : string
+		Central DEC(J2000) in 'hh:mm:ss' string format.
+	radius: float
+		Radius for box search in the database in arcminutes.
+	db_file : string
+		System path of the database file on the machine.
+	filt_choice : string, optional
+		Number of corresponding telescope filter requested. List of all options can be found below.
+		Defaults to '3' for I filterband.
+	tel_choice : int, optional
+		Number of corresponding site location requested. List of all options can be found below.
+		Defaults to 2 for lsc-doma-1m0a-fl15 in Chile.
+	mag_cutoff: int, optional
+		Sets the cutoff point for what counts as too dim of a star.
+		Stars with magnitudes that frequently dip below this point will be excluded. Defaults to 17.
+	mag_err_cutoff: int, optional
+		Sets the cutoff point for what counts as too inaccurate of a datapoint.
+		Data points with very high uncertainties can throw off our detection algorithm,
+		so we discard them from our calculations. Defaults to 0.1.
+
+	Outputs
+	_______
+	hjd
+	mag
+	magerr
+
+	"""
+	# SEARCH DB FOR STARS IN PROPER REGION
+	conn = phot_db.get_connection(dsn=db_file)
+	center = SkyCoord(ra,dec, frame='icrs', unit=(units.hourangle, units.deg))
+	results = phot_db.box_search_on_position(conn, center.ra.deg, center.dec.deg, radius/60.0, radius/60.0)
+
+	if len(results) == 0: 
+		print("Error: No stars found in this region!")
+		exit()
+
+	star_ids = []
+	times = []
+	mags = []
+	magerrs = []
+
+	info_list = []
+
+
+	print("Beginning database query and calculating predictions on " + str(len(results)) + " stars...")
+
+	for star_idx,star_id in enumerate(results['star_id']) :
+		time, mag, magerr = [[], [], []]
+		try:
+			for tel_choice in tel_choices: 
+				print(mag)	
+				time, mag, magerr = np.append([time, mag, magerr], extract_lightcurve(star_id, db_file, filt_choice, tel_choice, mag_cutoff, mag_err_cutoff), axis=1)
+				print(mag)
+			star_ids = np.append(star_ids, np.repeat(star_id, len(mag)))
+			times, mags, magerrs = np.append([times, mags, magerrs], [time, mag, magerr], axis=1)
+		except:
+			pass
+
+
+	# Generate results_*.txt file
+	print(mags)
+	print(star_ids)
+	results_table = Table({'star_id': star_ids, 'hjd': times, 'mag': mags, 'magerr': magerrs}, names=('star_id', 'hjd', 'mag', 'magerr'))
+	ascii.write(results_table, "lightcurves.txt", overwrite=True)
+	print("Text file generated. Program complete.")
