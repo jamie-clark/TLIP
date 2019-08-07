@@ -8,9 +8,9 @@ from LIA import models, microlensing_classifier, noise_models, training_set
 from pyDANDIA import phot_db
 from astropy.coordinates import SkyCoord
 from astropy import units
-from astropy.table import Table
+from astropy.table import Table, vstack
 from astropy.io import ascii
-import time
+from time import time
 import matplotlib.pyplot as plt
 import random
 from pyLIMA import event, telescopes, microlmodels
@@ -103,11 +103,12 @@ def ROME_classification_script(ra, dec, radius, db_file, LIA_directory, filt_cho
 		except:
 			pass
 
+	timestamp = time()
 	# Generate results.txt file
 	try:
 		results_table = Table(rows=info_list, names=('star_id', 'ra', 'dec', 'filter_telescope', 'prediction', 'probability', 'ml_probability'), meta={'name': 'full results table'})
 		results_table.sort('prediction', 'probability')
-		ascii.write(results_table, "results.txt", overwrite=True)
+		ascii.write(results_table, "results_"+str(timestamp)+".txt", overwrite=True)
 	except:
 		print("Writing table failed.")
 
@@ -193,7 +194,6 @@ def extract_lightcurve(star_id, db_file, filt_choice='3', tel_choice=2, mag_err_
 	magerr : float
 		Magerr is the uncertainty in the magnitude measurement.
 	"""
-	
 	# connect to db and query all lightcurve data for specified object
 	conn = phot_db.get_connection(dsn=db_file)
 	query = 'SELECT hjd, image, calibrated_mag, calibrated_mag_err FROM phot WHERE star_id="'+str(star_id)+'" AND filter="'+str(filt_choice)+'" AND facility="'+str(tel_choice)+'"'
@@ -210,12 +210,11 @@ def extract_lightcurve(star_id, db_file, filt_choice='3', tel_choice=2, mag_err_
 	magerr = np.asarray(phot_table['calibrated_mag_err'])
 	hjd = np.asarray(phot_table['hjd'])
 	image = np.asarray(phot_table['image'])
-	mask = np.all([mag >0, magerr <mag_err_cutoff], axis=0)
+	mask = np.all([mag >0, magerr <mag_err_cutoff, exposures==300], axis=0)
 	mag = mag[mask]
 	magerr = magerr[mask]
 	hjd = hjd[mask]
 	image = image[mask]
-
 	# include systematic errors associated with images
 	errors = np.loadtxt('systematic_errors.txt')
 	errors = Table(rows=errors, names=('image', 'sys_error'))
@@ -240,7 +239,11 @@ def extract_lightcurve(star_id, db_file, filt_choice='3', tel_choice=2, mag_err_
 		mags2.append(mag)
 		hjd2.append(hjd)
 		magerr2.append(new_error)
-	return(hjd2, mags2, magerr2)
+	mask = np.asarray(magerr2) <mag_err_cutoff
+	mag = np.asarray(mags2)[mask]
+	magerr = np.asarray(magerr2)[mask]
+	hjd = np.asarray(hjd2)[mask]
+	return(hjd, mag, magerr)
 
 def plot_lightcurve(hjd, mag, magerr):
 	"""Given a lightcurve, plots the results for the user to see using matplotlib.
@@ -314,10 +317,11 @@ def plot_all_lightcurves(star_id, db_file, mag_err_cutoff=0.1):
 	plot : plot
 		Results are plotted on the user's screen.
 	"""
-	color_list = ['g', 'r', 'k']
+	color_list = ['b', 'r', 'k']
 	marker_list = ['.', 'o', '^', 's', 'x', '+', 'D']
 	filter_list = [1,2,3]
-	site_list = [[[1,2], "LSC-DOMA"], [[8, 12], "CPT-DOMA"], [[3], "LSC-DOMB"], [[4, 5], "LSC-DOMC"], [[6, 10], "COJ-DOMA"], [[7, 11], "COJ-DOMB"], [[9], "CPT-DOMC"]]
+	#site_list = [[[1,2], "LSC-DOMA"], [[8, 12], "CPT-DOMA"], [[3], "LSC-DOMB"], [[4, 5], "LSC-DOMC"], [[6, 10], "COJ-DOMA"], [[7, 11], "COJ-DOMB"], [[9], "CPT-DOMC"]]
+	site_list =[[[1,4], "LSC-DOMA"], [[2,5], "COJ-DOMA"], [[3, 6], "CPT-DOMA"], [[7, 8], "LSC-DOMC"], [[9], "LSC-DOMB"], [[10, 12], "COJ-DOMB"], [[11], "CPT-DOMC"]]
 	plt.gca().invert_yaxis()
 	
 	for x,filt in enumerate(filter_list):
@@ -333,6 +337,8 @@ def plot_all_lightcurves(star_id, db_file, mag_err_cutoff=0.1):
 			plt.errorbar(np.asarray(hjd)-2450000, mag, c=color, marker=marker, yerr=magerr, linestyle="None")	
 	
 	plt.legend(loc='best')
+	plt.xlabel('HJD', fontsize=15)
+	plt.ylabel('Magnitude',fontsize=15)
 	plt.show()
 
 
@@ -365,11 +371,11 @@ def create_training_set(db_file, filt_choice, tel_choices, mag_err_cutoff=0.1):
         A txt file containing all PCA features plus class label. 
 	"""
 	random_integers = []
-	for i in range(1, 501):
+	for i in tqdm(range(1, 501)):
 		random_integers.append(random.randint(1, 162355))
 
 	timestamps = []
-	for star_id in random_integers:
+	for star_id in tqdm(random_integers):
 		hjd = []
 		try:
 			for tel_choice in tel_choices: 
@@ -400,13 +406,17 @@ def create_training_set(db_file, filt_choice, tel_choices, mag_err_cutoff=0.1):
 	rms = [0.0067, 0.0068, 0.007 , 0.0072, 0.0074, 0.0076, 0.0079, 0.0083,0.0086, 0.0091, 0.0096, 0.0102, 0.0108, 0.0115, 0.0124, 0.0133,0.0143, 0.0155, 0.0168, 0.0182, 0.0197, 0.0215, 0.0234, 0.0255,0.0278, 0.0304, 0.0332, 0.0363, 0.0397, 0.0435, 0.0476, 0.0521,0.0571, 0.0626, 0.0685, 0.0751, 0.0823, 0.0902, 0.0989, 0.1084,0.1188, 0.1302, 0.1428, 0.1565, 0.1716, 0.1882, 0.2063, 0.2262,0.248 , 0.2719, 0.2981, 0.3269, 0.3584, 0.3929, 0.4309, 0.4724,0.518 , 0.5679, 0.6227, 0.6828, 0.7487]
 	second_extracted_model = noise_models.create_noise(median, rms)
 
-	median = np.array([13. , 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9, 14. ,
-       14.1, 14.2, 14.3, 14.4, 14.5, 14.6, 14.7, 14.8, 14.9, 15. , 15.1,
-       15.2, 15.3, 15.4, 15.5, 15.6, 15.7, 15.8, 15.9, 16. , 16.1, 16.2,
-       16.3, 16.4, 16.5, 16.6, 16.7, 16.8, 16.9, 17. , 17.1, 17.2, 17.3,
-       17.4, 17.5, 17.6, 17.7, 17.8, 17.9, 18. , 18.1, 18.2, 18.3, 18.4,
-       18.5, 18.6, 18.7, 18.8, 18.9, 19. ])
+	median = np.array([12. , 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 12.9, 13. ,
+       13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9, 14. , 14.1,
+       14.2, 14.3, 14.4, 14.5, 14.6, 14.7, 14.8, 14.9, 15. , 15.1, 15.2,
+       15.3, 15.4, 15.5, 15.6, 15.7, 15.8, 15.9, 16. , 16.1, 16.2, 16.3,
+       16.4, 16.5, 16.6, 16.7, 16.8, 16.9, 17. , 17.1, 17.2, 17.3, 17.4,
+       17.5, 17.6, 17.7, 17.8, 17.9, 18. , 18.1, 18.2, 18.3, 18.4, 18.5,
+       18.6, 18.7, 18.8, 18.9, 19.])
+	median = median[::2]
 	rms = np.array([0.01      , 0.01      , 0.01      , 0.01      , 0.01      ,
+       0.01      , 0.01      , 0.01      , 0.01      , 0.01      ,
+       0.01      , 0.01      , 0.01      , 0.01      , 0.01      ,
        0.01      , 0.01      , 0.01      , 0.01      , 0.01      ,
        0.01      , 0.01      , 0.01      , 0.01      , 0.01      ,
        0.01      , 0.01      , 0.01008718, 0.01106038, 0.01212746,
@@ -419,9 +429,11 @@ def create_training_set(db_file, filt_choice, tel_choices, mag_err_cutoff=0.1):
        0.21075115, 0.23108404, 0.25337861, 0.27782412, 0.30462809,
        0.33401806, 0.36624352, 0.40157803, 0.44032156, 0.48280299,
        0.52938295])
+	rms = rms[::2]
+
 	third_extracted_model = noise_models.create_noise(median, rms)
 
-	training_set.create(timestamps, min_mag=14, max_mag=17, noise=third_extracted_model, n_class=500)
+	training_set.create(timestamps, min_mag=13, max_mag=18, noise=third_extracted_model, n_class=500)
 	print("Training set generated. Program complete.")
 
 
@@ -478,7 +490,7 @@ def drip_feed(star_id, db_file, LIA_directory, filt_choice, tel_choices, mag_cut
 	prob_pred_list3=[]
 	prob_pred_list4=[]
 
-	for i in range(3, len(mjd)-1, 1):
+	for i in tqdm(range(3, len(mjd)-1, 1)):
 	               
 	                current_mag = mag[0:i+1]
 	                current_magerr = magerr[0:i+1]
@@ -506,6 +518,7 @@ def drip_feed(star_id, db_file, LIA_directory, filt_choice, tel_choices, mag_cut
 	plt.errorbar(mjd, mag, yerr=magerr, fmt='ro', label = 'i')
 	plt.legend(loc=2,prop={'size': 20})
 	plt.ylabel('Magnitude', fontsize=30)
+	plt.title('ID: '+str(star_id), fontsize=30)	
 	plt.xlim(mjd[0], mjd[-2])
 	#plt.title('OGLE-1999-BUL-40', fontsize=40)
 	ax1.tick_params(axis='y', labelsize=20)
@@ -785,11 +798,11 @@ def full_pipeline():
 	"""
 	ID = 107503 
 	db = '/home/jclark/examples/ROME-FIELD-16_phot.db'
-	tel_choices = [2]
-	mag_err_cutoff=50
+	tel_choices = [1,4]
+	mag_err_cutoff=0.5
 	prob_cutoff = 0.20
-	prob_override = 0.40
-	radius=1.5
+	prob_override = 0.50
+	radius=60
 
 	#import pdb; pdb.set_trace()
 	#print(extract_ra_dec(33065, '/home/jclark/examples/ROME-FIELD-16_phot.db'))
@@ -821,10 +834,10 @@ def full_pipeline():
 	overrides = overrides[y == 0]
 	print("We had "+str(len(overrides))+" overrides.")
 	for x in results:
-		#print(x)
-		pyLIMA_plot_from_db(x,db,tel_choices=tel_choices,mag_err_cutoff=mag_err_cutoff)
+		print("Result ID: "+str(x))
+		#pyLIMA_plot_from_db(x,db,tel_choices=tel_choices,mag_err_cutoff=mag_err_cutoff)
 	for x in overrides:
-		pyLIMA_plot_from_db(x,db,tel_choices=tel_choices,mag_err_cutoff=mag_err_cutoff)
+		#pyLIMA_plot_from_db(x,db,tel_choices=tel_choices,mag_err_cutoff=mag_err_cutoff)
 		print("Override ID: "+str(x))
 #	for target in np.append(results, overrides):
 		# process target
@@ -833,7 +846,7 @@ def full_pipeline():
 			# add it to the page and cross listed catalog
 
 
-def new_extract_med_std(conn,ra,dec,radius,filt_choice,telo,overriding_results=[]):
+def new_extract_med_std(conn,ra,dec,radius,filt_choice,telos,overriding_results=[]):
 
 
 	
@@ -850,9 +863,12 @@ def new_extract_med_std(conn,ra,dec,radius,filt_choice,telo,overriding_results=[
 	if len(results) > 0:
 		
 		for star_id in tqdm(results['star_id']):
-
-			query = 'SELECT filter, facility, hjd, calibrated_mag, calibrated_mag_err FROM phot WHERE star_id="'+str(star_id)+'" AND filter="'+str(filt_choice)+'" AND facility="'+str(telo)+'"'	    
-			phot_table = phot_db.query_to_astropy_table(conn, query, args=())
+			for telo in telos:
+				query = 'SELECT filter, facility, hjd, calibrated_mag, calibrated_mag_err FROM phot WHERE star_id="'+str(star_id)+'" AND filter="'+str(filt_choice)+'" AND facility="'+str(telo)+'"'	    	
+				if telo == telos[0]:
+					phot_table = phot_db.query_to_astropy_table(conn, query, args=())
+				else:
+					phot_table = vstack([phot_table, phot_db.query_to_astropy_table(conn, query, args=())])
 			#import pdb; pdb.set_trace()
 			mask =  phot_table['calibrated_mag'] >0
 			uncerts = np.asarray(phot_table['calibrated_mag_err'][mask])
@@ -940,3 +956,365 @@ def extract_med_std(conn,ra,dec,radius,filt,telo):
 			
 
 	return medians,stds
+
+def extract_airmass(star,db,filt,tel_choices):
+	conn = phot_db.get_connection(dsn=db)
+	airmasses = []
+	image_ids = []
+	hjds = []
+	mags = []
+	magerrs = []
+	for telo in tel_choices:
+		query = 'SELECT airmass, img_id, date_obs_jd FROM images WHERE facility="'+str(telo)+'" AND filter="'+str(filt)+ '"'
+		phot_table = phot_db.query_to_astropy_table(conn, query, args=())
+		
+		for airmass, image, hjd in phot_table:
+			try:
+				query = 'SELECT hjd, image, calibrated_mag, calibrated_mag_err FROM phot WHERE image="'+str(image)+'" AND facility="'+str(telo)+'" AND filter="'+str(filt)+'" AND star_id="'+str(star)+'"'
+				temp_table = phot_db.query_to_astropy_table(conn, query, args=())
+				hjds = np.append(hjds, temp_table[0][0])
+				mags = np.append(mags, temp_table[0][2])
+				magerrs = np.append(magerrs, temp_table[0][3])
+				airmasses = np.append(airmasses, airmass)
+				image_ids = np.append(image_ids, image)
+			except:
+				pass
+	airmasses = airmasses[mags >0]
+	magerrs = magerrs[mags >0]
+	image_ids = image_ids[mags >0]
+	hjds = hjds[mags >0]
+	mags = mags[mags >0]
+
+	errors = np.loadtxt('systematic_errors.txt')
+	errors = Table(rows=errors, names=('image', 'sys_error'))
+	#errors = errors[0]
+	#import pdb; pdb.set_trace()
+	data = Table([mags, magerrs, hjds, image_ids], names=('mag', 'magerr', 'hjd', 'image'))
+
+	mags2 = []
+	magerr2 = []
+	hjd2 = []
+
+	for mag,magerr,hjd,image in data:
+		try:
+			result = np.where(np.asarray(errors['image']) == image)
+			location = result[0][0]
+			error = errors[location][1]
+			new_error = np.sqrt(float(magerr)**2+float(error)**2)
+			
+		except:
+			#print("We found an error.")
+			new_error = magerr
+		mags2.append(mag)
+		hjd2.append(hjd)
+		magerr2.append(new_error)
+
+
+	mean = weighted_mean(mags2, magerr2)
+	residuals = mags2 - mean
+	plt.scatter(mags2, airmasses)
+	plt.xlabel('Magnitude', fontsize=15)
+	plt.ylabel('Airmass',fontsize=15)
+	plt.title('ID: '+str(star)+", mean mag = "+str(np.round(mean, 2)))
+	plt.show()
+
+
+
+
+def extract_airmass_residuals(star,db,filt,tel_choices):
+	conn = phot_db.get_connection(dsn=db)
+	airmasses = []
+	image_ids = []
+	hjds = []
+	mags = []
+	magerrs = []
+	for telo in tel_choices:
+		query = 'SELECT airmass, img_id, date_obs_jd FROM images WHERE facility="'+str(telo)+'" AND filter="'+str(filt)+ '"'
+		phot_table = phot_db.query_to_astropy_table(conn, query, args=())
+		
+		for airmass, image, hjd in phot_table:
+			try:
+				query = 'SELECT hjd, image, calibrated_mag, calibrated_mag_err FROM phot WHERE image="'+str(image)+'" AND facility="'+str(telo)+'" AND filter="'+str(filt)+'" AND star_id="'+str(star)+'"'
+				temp_table = phot_db.query_to_astropy_table(conn, query, args=())
+				hjds = np.append(hjds, temp_table[0][0])
+				mags = np.append(mags, temp_table[0][2])
+				magerrs = np.append(magerrs, temp_table[0][3])
+				airmasses = np.append(airmasses, airmass)
+				image_ids = np.append(image_ids, image)
+			except:
+				pass
+	airmasses = airmasses[mags >0]
+	magerrs = magerrs[mags >0]
+	image_ids = image_ids[mags >0]
+	hjds = hjds[mags >0]
+	mags = mags[mags >0]
+
+	errors = np.loadtxt('systematic_errors.txt')
+	errors = Table(rows=errors, names=('image', 'sys_error'))
+	#errors = errors[0]
+	#import pdb; pdb.set_trace()
+	data = Table([mags, magerrs, hjds, image_ids], names=('mag', 'magerr', 'hjd', 'image'))
+
+	mags2 = []
+	magerr2 = []
+	hjd2 = []
+
+	for mag,magerr,hjd,image in data:
+		try:
+			result = np.where(np.asarray(errors['image']) == image)
+			location = result[0][0]
+			error = errors[location][1]
+			new_error = np.sqrt(float(magerr)**2+float(error)**2)
+			
+		except:
+			#print("We found an error.")
+			new_error = magerr
+		mags2.append(mag)
+		hjd2.append(hjd)
+		magerr2.append(new_error)
+
+
+	mean = weighted_mean(mags2, magerr2)
+	residuals = mags2 - mean
+	plt.scatter(airmasses, residuals)
+	plt.ylabel('Residual', fontsize=15)
+	plt.xlabel('Airmass',fontsize=15)
+	plt.title('ID: '+str(star)+", mean mag = "+str(np.round(mean, 2)))
+	plt.gca().invert_yaxis()
+	plt.show()
+
+def extract_background_residuals(star,db,filt,tel_choices):
+	conn = phot_db.get_connection(dsn=db)
+	airmasses = []
+	image_ids = []
+	hjds = []
+	mags = []
+	magerrs = []
+	backgrounds = []
+	for telo in tel_choices:
+		query = 'SELECT airmass, img_id, date_obs_jd FROM images WHERE facility="'+str(telo)+'" AND filter="'+str(filt)+ '"'
+		phot_table = phot_db.query_to_astropy_table(conn, query, args=())
+		
+		for airmass, image, hjd in phot_table:
+			try:
+				query = 'SELECT hjd, image, calibrated_mag, calibrated_mag_err, local_background FROM phot WHERE image="'+str(image)+'" AND facility="'+str(telo)+'" AND filter="'+str(filt)+'" AND star_id="'+str(star)+'"'
+				temp_table = phot_db.query_to_astropy_table(conn, query, args=())
+				hjds = np.append(hjds, temp_table[0][0])
+				mags = np.append(mags, temp_table[0][2])
+				magerrs = np.append(magerrs, temp_table[0][3])
+				airmasses = np.append(airmasses, airmass)
+				image_ids = np.append(image_ids, image)
+				backgrounds = np.append(backgrounds, temp_table[0][4])
+			except:
+				pass
+	airmasses = airmasses[mags >0]
+	magerrs = magerrs[mags >0]
+	image_ids = image_ids[mags >0]
+	hjds = hjds[mags >0]
+	backgrounds = backgrounds[mags >0]
+	mags = mags[mags >0]
+
+	errors = np.loadtxt('systematic_errors.txt')
+	errors = Table(rows=errors, names=('image', 'sys_error'))
+	#errors = errors[0]
+	data = Table([mags, magerrs, hjds, image_ids], names=('mag', 'magerr', 'hjd', 'image'))
+
+	mags2 = []
+	magerr2 = []
+	hjd2 = []
+	#import pdb; pdb.set_trace()
+
+
+	for mag,magerr,hjd,image in data:
+		try:
+			result = np.where(np.asarray(errors['image']) == image)
+			location = result[0][0]
+			error = errors[location][1]
+			new_error = np.sqrt(float(magerr)**2+float(error)**2)
+			
+		except:
+			#print("We found an error.")
+			new_error = magerr
+		mags2.append(mag)
+		hjd2.append(hjd)
+		magerr2.append(new_error)
+
+
+	mean = weighted_mean(mags2, magerr2)
+	residuals = mags2 - mean
+	plt.scatter(backgrounds, residuals)
+	plt.ylabel('Residual', fontsize=15)
+	plt.xlabel('Sky Background',fontsize=15)
+	plt.title('ID: '+str(star)+", mean mag = "+str(np.round(mean, 2)))
+	plt.gca().invert_yaxis()
+	plt.show()
+
+
+def extract_airmass_vs_hjd(star,db,filt,tel_choices):
+	conn = phot_db.get_connection(dsn=db)
+	airmasses = []
+	image_ids = []
+	hjds = []
+	mags = []
+	magerrs = []
+	for telo in tel_choices:
+		query = 'SELECT airmass, img_id, date_obs_jd FROM images WHERE facility="'+str(telo)+'" AND filter="'+str(filt)+ '"'
+		phot_table = phot_db.query_to_astropy_table(conn, query, args=())
+		
+		for airmass, image, hjd in phot_table:
+			try:
+				query = 'SELECT hjd, image, calibrated_mag, calibrated_mag_err FROM phot WHERE image="'+str(image)+'" AND facility="'+str(telo)+'" AND filter="'+str(filt)+'" AND star_id="'+str(star)+'"'
+				temp_table = phot_db.query_to_astropy_table(conn, query, args=())
+				hjds = np.append(hjds, temp_table[0][0])
+				mags = np.append(mags, temp_table[0][2])
+				magerrs = np.append(magerrs, temp_table[0][3])
+				airmasses = np.append(airmasses, airmass)
+				image_ids = np.append(image_ids, image)
+			except:
+				pass
+	airmasses = airmasses[mags >0]
+	magerrs = magerrs[mags >0]
+	image_ids = image_ids[mags >0]
+	hjds = hjds[mags >0]
+	mags = mags[mags >0]
+
+	plt.scatter(hjds, airmasses)
+	plt.xlabel('HJD', fontsize=15)
+	plt.ylabel('Airmass',fontsize=15)
+	plt.title('ID: '+str(star))
+	plt.gca().invert_yaxis()
+	plt.show()
+
+def extract_blank_residuals(star,db,filt,tel_choices,quantity):
+	#import pdb; pdb.set_trace()
+	conn = phot_db.get_connection(dsn=db)
+	airmasses = []
+	image_ids = []
+	hjds = []
+	mags = []
+	magerrs = []
+	exps = []
+	for telo in tel_choices:
+		query = 'SELECT '+str(quantity)+', img_id, date_obs_jd, exposure_time FROM images WHERE facility="'+str(telo)+'" AND filter="'+str(filt)+ '"'
+		phot_table = phot_db.query_to_astropy_table(conn, query, args=())
+		
+		for airmass, image, hjd,exp in phot_table:
+			try:
+				query = 'SELECT hjd, image, calibrated_mag, calibrated_mag_err FROM phot WHERE image="'+str(image)+'" AND facility="'+str(telo)+'" AND filter="'+str(filt)+'" AND star_id="'+str(star)+'"'
+				temp_table = phot_db.query_to_astropy_table(conn, query, args=())
+				hjds = np.append(hjds, temp_table[0][0])
+				mags = np.append(mags, temp_table[0][2])
+				magerrs = np.append(magerrs, temp_table[0][3])
+				airmasses = np.append(airmasses, airmass)
+				image_ids = np.append(image_ids, image)
+				exps = np.append(exps, np.round(exp, 0))
+			except:
+				pass
+	airmasses = airmasses[mags >0]
+	magerrs = magerrs[mags >0]
+	image_ids = image_ids[mags >0]
+	hjds = hjds[mags >0]
+	exps = exps[mags >0]
+	mags = mags[mags >0]
+
+	errors = np.loadtxt('systematic_errors.txt')
+	errors = Table(rows=errors, names=('image', 'sys_error'))
+	#errors = errors[0]
+	#import pdb; pdb.set_trace()
+	data = Table([mags, magerrs, hjds, image_ids], names=('mag', 'magerr', 'hjd', 'image'))
+
+	mags2 = []
+	magerr2 = []
+	hjd2 = []
+
+	for mag,magerr,hjd,image in data:
+		try:
+			result = np.where(np.asarray(errors['image']) == image)
+			location = result[0][0]
+			error = errors[location][1]
+			new_error = np.sqrt(float(magerr)**2+float(error)**2)
+			
+		except:
+			#print("We found an error.")
+			new_error = magerr
+		mags2.append(mag)
+		hjd2.append(hjd)
+		magerr2.append(new_error)
+
+
+	mean = weighted_mean(mags2, magerr2)
+	residuals = mags2 - mean
+	airmasses_1 = airmasses[exps ==300]
+	airmasses_2 = airmasses[exps !=300]
+	residuals_1 = residuals[exps ==300]
+	residuals_2 = residuals[exps !=300]
+	plt.scatter(airmasses_1, residuals_1, color='blue', label='300s exposure')
+	plt.scatter(airmasses_2, residuals_2, color='red', label='not 300s exposure')
+	plt.ylabel('Residual', fontsize=15)
+	plt.xlabel(str(quantity),fontsize=15)
+	plt.legend()
+	plt.title('ID: '+str(star)+", mean mag = "+str(np.round(mean, 2)))
+	plt.gca().invert_yaxis()
+	plt.show()
+
+def extract_hjds_residuals(star,db,filt,tel_choices):
+	conn = phot_db.get_connection(dsn=db)
+	airmasses = []
+	image_ids = []
+	hjds = []
+	mags = []
+	magerrs = []
+	for telo in tel_choices:
+		query = 'SELECT airmass, img_id, date_obs_jd FROM images WHERE facility="'+str(telo)+'" AND filter="'+str(filt)+ '"'
+		phot_table = phot_db.query_to_astropy_table(conn, query, args=())
+		
+		for airmass, image, hjd in phot_table:
+			try:
+				query = 'SELECT hjd, image, calibrated_mag, calibrated_mag_err FROM phot WHERE image="'+str(image)+'" AND facility="'+str(telo)+'" AND filter="'+str(filt)+'" AND star_id="'+str(star)+'"'
+				temp_table = phot_db.query_to_astropy_table(conn, query, args=())
+				hjds = np.append(hjds, temp_table[0][0])
+				mags = np.append(mags, temp_table[0][2])
+				magerrs = np.append(magerrs, temp_table[0][3])
+				airmasses = np.append(airmasses, airmass)
+				image_ids = np.append(image_ids, image)
+			except:
+				pass
+	airmasses = airmasses[mags >0]
+	magerrs = magerrs[mags >0]
+	image_ids = image_ids[mags >0]
+	hjds = hjds[mags >0]
+	mags = mags[mags >0]
+
+	errors = np.loadtxt('systematic_errors.txt')
+	errors = Table(rows=errors, names=('image', 'sys_error'))
+	#errors = errors[0]
+	#import pdb; pdb.set_trace()
+	data = Table([mags, magerrs, hjds, image_ids], names=('mag', 'magerr', 'hjd', 'image'))
+
+	mags2 = []
+	magerr2 = []
+	hjd2 = []
+
+	for mag,magerr,hjd,image in data:
+		try:
+			result = np.where(np.asarray(errors['image']) == image)
+			location = result[0][0]
+			error = errors[location][1]
+			new_error = np.sqrt(float(magerr)**2+float(error)**2)
+			
+		except:
+			#print("We found an error.")
+			new_error = magerr
+		mags2.append(mag)
+		hjd2.append(hjd)
+		magerr2.append(new_error)
+
+
+	mean = weighted_mean(mags2, magerr2)
+	residuals = mags2 - mean
+	plt.scatter(hjds, residuals)
+	plt.ylabel('Residual', fontsize=15)
+	plt.xlabel('HJD',fontsize=15)
+	plt.title('ID: '+str(star)+", mean mag = "+str(np.round(mean, 2)))
+	plt.gca().invert_yaxis()
+	plt.show()

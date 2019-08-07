@@ -193,7 +193,7 @@ def fit_spline(mag, std):
 #FIELD-16
 ra = '18:00:17.9956'	
 dec = '-28:32:15.2109'
-db_dir = '/home/jclark/examples/ROME-FIELD-16_phot_3sites_ip.db'
+db_dir = '/home/jclark/examples/ROME-FIELD-16_phot.db'
 
 ZP = 25
 BACKGROUND = 15000
@@ -217,6 +217,9 @@ radius = 5/ 60.0 #arcmins
 
 
 if __name__ == '__main__':
+	print(facilities)
+	print(filters)
+	exit()
 	meds,stds = extract_med_std(conn,ra,dec,radius,filt_choice,tel_choice)
 	#mags,poissons = extract_med_poisson(conn,ra,dec,radius,filt_choice,tel_choice)
 	import pdb; pdb.set_trace()
