@@ -1,0 +1,8 @@
+numpy
+astropy
+matplotlib
+tqdm
+importlib
+LIA
+pyDANDIA
+pyLIMA
