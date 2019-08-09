@@ -219,7 +219,6 @@ radius = 5/ 60.0 #arcmins
 if __name__ == '__main__':
 	print(facilities)
 	print(filters)
-	exit()
 	meds,stds = extract_med_std(conn,ra,dec,radius,filt_choice,tel_choice)
 	#mags,poissons = extract_med_poisson(conn,ra,dec,radius,filt_choice,tel_choice)
 	import pdb; pdb.set_trace()

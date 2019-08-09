@@ -885,27 +885,6 @@ def new_extract_med_std(conn,ra,dec,radius,filt_choice,telos,overriding_results=
 	return medians,stds,stars
 
 
-def plot_cam12_lightcurves(star_id, db_file, mag_err_cutoff):
-	color_list = ['k']
-	marker_list = ['.', 'x']
-	filter_list = [3]
-	site_list = [[[1], "CAM 1"], [[2], "CAM 2"]]
-	plt.gca().invert_yaxis()
-	for x,filt in enumerate(filter_list):
-		color = color_list[x]
-		for y,site in enumerate(site_list):
-			hjd, mag, magerr = [[], [], []]
-			tel_choices = site[0]
-			site_name = site[1]
-			marker = marker_list[y]
-			for tel_choice in tel_choices: 
-				hjd, mag, magerr = np.append([hjd, mag, magerr], extract_lightcurve(star_id=star_id, db_file=db_file, filt_choice=filt, tel_choice=tel_choice, mag_err_cutoff=mag_err_cutoff), axis=1)
-			#print(hjd,mag,magerr)
-			plt.scatter(np.asarray(hjd-2450000), mag, c=color, marker=marker, label=site_name)
-			plt.errorbar(np.asarray(hjd)-2450000, mag, c=color, marker=marker, yerr=magerr, linestyle="None")	
-	plt.legend(loc='best')
-	plt.show()
-
 
 def weighted_mean(data, uncert):
 	w_i = np.power(uncert, -2)
